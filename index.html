@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="mr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>पाहा आणि कमवा</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{--bg:#0f172a;--card:#1e293b;--txt:#f1f5f9;--mut:#94a3b8;--acc:#22c55e;--err:#f87171}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--txt)}
+  .wrap{max-width:480px;margin:0 auto;padding:16px}
+  h1{font-size:22px;margin:8px 0 16px}
+  .card{background:var(--card);border-radius:14px;padding:16px;margin-bottom:14px}
+  input{width:100%;padding:12px;margin:6px 0;border-radius:10px;border:1px solid #334155;background:#0f172a;color:var(--txt);font-size:16px}
+  button{width:100%;padding:13px;border:0;border-radius:10px;background:var(--acc);color:#04210f;font-size:16px;font-weight:700;margin-top:8px}
+  button.sec{background:#334155;color:var(--txt)}
+  button:disabled{opacity:.5}
+  .pts{font-size:40px;font-weight:800;color:var(--acc)}
+  .mut{color:var(--mut);font-size:14px}
+  .msg{margin-top:8px;font-size:14px}
+  .err{color:var(--err)}
+  .bar{height:8px;background:#334155;border-radius:99px;overflow:hidden;margin:10px 0}
+  .bar>div{height:100%;width:0;background:var(--acc);transition:width 1s linear}
+  video,iframe{width:100%;border-radius:10px;border:0;background:#000}
+  .hidden{display:none}
+  table{width:100%;font-size:14px;border-collapse:collapse}
+  td{padding:6px 0;border-bottom:1px solid #334155}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎬 पाहा आणि कमवा</h1>
+
+  <!-- लॉगिन -->
+  <div id="authBox" class="card">
+    <input id="email" type="email" placeholder="ईमेल">
+    <input id="pass" type="password" placeholder="पासवर्ड (किमान 6 अक्षरे)">
+    <button onclick="login()">लॉगिन</button>
+    <button class="sec" onclick="signup()">नवीन खाते उघडा</button>
+    <div id="authMsg" class="msg"></div>
+  </div>
+
+  <!-- मुख्य पान -->
+  <div id="app" class="hidden">
+    <div class="card">
+      <div class="mut">तुमचे पॉइंट्स</div>
+      <div class="pts" id="points">0</div>
+      <button class="sec" onclick="logout()">लॉगआउट</button>
+    </div>
+
+    <div class="card">
+      <b>व्हिडिओ पाहा, 1 पॉइंट मिळवा</b>
+      <p class="mut">15 सेकंद व्हिडिओ पूर्ण पाहा. दोन क्लेममध्ये किमान 60 सेकंद अंतर आहे.</p>
+      <video id="vid" controls playsinline
+        src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"></video>
+      <div class="bar"><div id="bar"></div></div>
+      <button id="claimBtn" onclick="claim()" disabled>पॉइंट घ्या</button>
+      <div id="claimMsg" class="msg"></div>
+    </div>
+
+    <!-- Offerzy साठी जागा -->
+    <div class="card">
+      <b>अधिक ऑफर्स (Offerzy)</b>
+      <div id="offerzySlot" class="mut" style="margin-top:8px">
+        Offerzy चा iframe किंवा स्क्रिप्ट कोड येथे बसवा (README पाहा).
+      </div>
+      <!-- उदाहरण: <iframe src="OFFERZY_OFFERWALL_URL?user_id=" height="600"></iframe> -->
+    </div>
+
+    <div class="card">
+      <b>इतिहास</b>
+      <table id="hist"></table>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== येथे तुमचे Supabase तपशील भरा =====
+const SUPABASE_URL = "YOUR_SUPABASE_URL";
+const SUPABASE_KEY = "YOUR_SUPABASE_ANON_KEY";
+// =========================================
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const $ = id => document.getElementById(id);
+let watched = 0, timer = null;
+const NEED = 15;
+
+function authMsg(t, bad){ $("authMsg").textContent = t; $("authMsg").className = "msg " + (bad ? "err" : ""); }
+
+async function signup(){
+  const { error } = await sb.auth.signUp({ email: $("email").value, password: $("pass").value });
+  if (error) return authMsg(error.message, true);
+  authMsg("खाते तयार झाले. आता लॉगिन करा. (ईमेल पुष्टीकरण चालू असल्यास ईमेल तपासा)");
+}
+async function login(){
+  const { error } = await sb.auth.signInWithPassword({ email: $("email").value, password: $("pass").value });
+  if (error) return authMsg(error.message, true);
+  init();
+}
+async function logout(){ await sb.auth.signOut(); location.reload(); }
+
+async function init(){
+  const { data:{ session } } = await sb.auth.getSession();
+  if (!session) return;
+  $("authBox").classList.add("hidden");
+  $("app").classList.remove("hidden");
+  // Offerzy ला युजर ओळखण्यासाठी: session.user.id वापरा
+  window.CURRENT_USER_ID = session.user.id;
+  refresh();
+}
+
+async function refresh(){
+  const { data: p } = await sb.from("profiles").select("points").single();
+  if (p) $("points").textContent = p.points;
+  const { data: h } = await sb.from("points_log").select("*").order("created_at",{ascending:false}).limit(10);
+  $("hist").innerHTML = (h||[]).map(r =>
+    `<tr><td>+${r.points} पॉइंट</td><td class="mut">${new Date(r.created_at).toLocaleString("mr-IN")}</td></tr>`).join("");
+}
+
+// व्हिडिओ पाहिलेला वेळ मोजणे (फक्त प्ले होत असताना)
+const vid = $("vid");
+vid.addEventListener("play", () => {
+  clearInterval(timer);
+  timer = setInterval(() => {
+    if (!vid.paused && !document.hidden) {
+      watched++;
+      $("bar").style.width = Math.min(100, watched / NEED * 100) + "%";
+      if (watched >= NEED) { $("claimBtn").disabled = false; clearInterval(timer); }
+    }
+  }, 1000);
+});
+
+async function claim(){
+  $("claimBtn").disabled = true;
+  const { data, error } = await sb.rpc("claim_points");
+  if (error) {
+    $("claimMsg").textContent = error.message; $("claimMsg").className = "msg err";
+  } else {
+    $("claimMsg").textContent = "✅ 1 पॉइंट मिळाला!"; $("claimMsg").className = "msg";
+    watched = 0; $("bar").style.width = "0"; vid.currentTime = 0;
+    refresh();
+  }
+}
+
+init();
+</script>
+</body>
+</html>
